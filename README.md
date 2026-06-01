@@ -16,12 +16,15 @@ It is intentionally separate from the broader Mission Control app. The public re
 
 ## Privacy boundary
 
+The deployed app is protected by a simple password gate. Real relationship data still remains local-first in the browser after login.
+
 Do **not** commit real people data to this repo.
 
 - Safe in repo: UI code, schema, docs, examples, fake demo data.
 - Private: real names, phone numbers, emails, sensitive notes, work/confidential details.
 - Current storage: local browser storage only.
 - Backup: manual JSON export from the app.
+- Deployment password: set in Vercel as `PEOPLE_HQ_PASSWORD`; keep `.env.local` uncommitted.
 
 ## Local development
 

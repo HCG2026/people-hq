@@ -1,0 +1,17 @@
+export const ACCESS_COOKIE_NAME = "people_hq_access";
+export const publicAuthPaths = ["/login", "/api/login"];
+
+export function isValidAccessPassword(input: string, expected: string | undefined): boolean {
+  if (!expected) return false;
+  if (!input) return false;
+  return input === expected;
+}
+
+export function accessTokenForPassword(password: string | undefined): string {
+  if (!password) return "";
+  return btoa(`people-hq:${password}:v1`);
+}
+
+export function isPublicAuthPath(pathname: string): boolean {
+  return publicAuthPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}

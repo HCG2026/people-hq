@@ -1,6 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { blankPerson, seedPeople, STORAGE_KEY, today, uid, type Person, type PersonType, type Touchpoint, type TouchpointType } from "@/lib/people";
 
@@ -11,6 +12,29 @@ function daysSince(date?: string) {
   return Math.max(0, Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
+function formatDate(date?: string) {
+  if (!date) return "Not logged";
+  return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "?";
+}
+
+function parseLabel(text: string, label: string) {
+  const match = text.match(new RegExp(`^${label}\\s*:\\s*(.+)$`, "im"));
+  return match?.[1]?.trim() ?? "";
+}
+
 function parseQuickCapture(text: string): Partial<Person> & { touchpoint?: Partial<Touchpoint> } {
   const lines = text
     .split(/\n+/)
@@ -19,15 +43,17 @@ function parseQuickCapture(text: string): Partial<Person> & { touchpoint?: Parti
   const lower = text.toLowerCase();
   const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "";
   const phone = text.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/)?.[0] ?? "";
-  const nameLine = lines.find((l) => /^name\s*:/i.test(l));
-  const rawName = nameLine ? nameLine.replace(/^name\s*:/i, "").trim() : lines[0]?.replace(/^met\s+/i, "").split(/[,.—-]/)[0]?.trim();
+  const nameLine = parseLabel(text, "name");
+  const rawName = nameLine || lines[0]?.replace(/^met\s+/i, "").split(/[,.—-]/)[0]?.trim();
   const name = rawName
     ?.replace(/\s+for\s+(coffee|lunch|dinner|drinks|a call|call|meeting).*$/i, "")
     .replace(/\s+at\s+.*$/i, "")
     .replace(/\s+today$/i, "")
     .trim();
 
-  const type: PersonType = lower.includes("work") || lower.includes("centerbridge") || lower.includes("finance") ? "work" : "personal";
+  const typeText = parseLabel(text, "personal or work").toLowerCase();
+  const type: PersonType =
+    typeText.includes("work") || lower.includes("work") || lower.includes("centerbridge") || lower.includes("finance") ? "work" : "personal";
   const touchType: TouchpointType = lower.includes("coffee")
     ? "coffee"
     : lower.includes("dinner")
@@ -42,16 +68,22 @@ function parseQuickCapture(text: string): Partial<Person> & { touchpoint?: Parti
     name: name || "",
     type,
     email,
-    phone,
+    phone: parseLabel(text, "phone") || phone,
+    relationship: parseLabel(text, "relationship"),
+    organization: parseLabel(text, "org / context") || parseLabel(text, "organization"),
+    metAt: parseLabel(text, "where/when i met them") || parseLabel(text, "met at"),
     metOn: today(),
+    priority: lower.includes("priority: a") ? "A" : lower.includes("priority: c") ? "C" : "B",
+    tags: parseLabel(text, "tags"),
     lastContact: today(),
+    nextStep: parseLabel(text, "next step"),
     notes: text,
     touchpoint: {
       date: today(),
       type: touchType,
-      summary: text,
-      topics: "",
-      followUp: "",
+      summary: parseLabel(text, "what we discussed") || text,
+      topics: parseLabel(text, "tags"),
+      followUp: parseLabel(text, "next step"),
     },
   };
 }
@@ -62,12 +94,18 @@ export default function Home() {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as Person[]) : seedPeople;
   });
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URL(window.location.href).searchParams.get("person") ?? "";
+  });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | PersonType>("all");
-  const [form, setForm] = useState<Person>(blankPerson());
   const [quickText, setQuickText] = useState("");
-  const [syncStatus, setSyncStatus] = useState("Loading server sync…");
+  const [syncStatus, setSyncStatus] = useState("Loading sync…");
+  const [view, setView] = useState<"list" | "detail">(() => {
+    if (typeof window === "undefined") return "list";
+    return new URL(window.location.href).searchParams.get("person") ? "detail" : "list";
+  });
   const serverEnabled = useRef(false);
   const loadedServer = useRef(false);
   const skipNextServerSave = useRef(false);
@@ -86,12 +124,14 @@ export default function Home() {
         skipNextServerSave.current = true;
         const remotePeople = Array.isArray(body.people) ? body.people : [];
         setPeople(remotePeople);
-        setSelectedId(remotePeople[0]?.id ?? "");
-        setSyncStatus(`Server sync on · ${remotePeople.length} people`);
+        const requestedId = new URL(window.location.href).searchParams.get("person");
+        setSelectedId(requestedId || remotePeople[0]?.id || "");
+        setView(requestedId ? "detail" : "list");
+        setSyncStatus(`Synced · ${remotePeople.length} people`);
       } catch {
         if (cancelled) return;
         loadedServer.current = true;
-        setSyncStatus("Local-only fallback · server sync not configured");
+        setSyncStatus("Local fallback on this device");
       }
     }
 
@@ -115,7 +155,7 @@ export default function Home() {
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       try {
-        setSyncStatus("Saving to server…");
+        setSyncStatus("Saving…");
         const response = await fetch("/api/people", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -123,9 +163,9 @@ export default function Home() {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("save failed");
-        setSyncStatus(`Server sync on · ${people.length} people`);
+        setSyncStatus(`Synced · ${people.length} people`);
       } catch {
-        if (!controller.signal.aborted) setSyncStatus("Save failed · local backup kept in this browser");
+        if (!controller.signal.aborted) setSyncStatus("Save failed · local backup kept");
       }
     }, 700);
 
@@ -141,38 +181,13 @@ export default function Home() {
     const q = query.toLowerCase();
     return people
       .filter((p) => filter === "all" || p.type === filter)
-      .filter((p) => [p.name, p.relationship, p.organization, p.tags, p.notes].join(" ").toLowerCase().includes(q))
-      .sort((a, b) => {
-        const priority = { A: 0, B: 1, C: 2 };
-        return priority[a.priority] - priority[b.priority] || daysSince(b.lastContact) - daysSince(a.lastContact);
-      });
+      .filter((p) => [p.name, p.relationship, p.organization, p.tags, p.notes, p.phone, p.email].join(" ").toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [people, query, filter]);
 
   const stale = people.filter((p) => daysSince(p.lastContact) > 45);
   const work = people.filter((p) => p.type === "work").length;
   const personal = people.filter((p) => p.type === "personal").length;
-
-  function updateForm<K extends keyof Person>(key: K, value: Person[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function savePerson(e: FormEvent) {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    const next = { ...form, name: form.name.trim(), id: form.id || uid("person") };
-    setPeople((prev) => {
-      const exists = prev.some((p) => p.id === next.id);
-      return exists ? prev.map((p) => (p.id === next.id ? next : p)) : [next, ...prev];
-    });
-    setSelectedId(next.id);
-    setForm(blankPerson());
-  }
-
-  function editPerson(p: Person) {
-    setForm(p);
-    setSelectedId(p.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
 
   function addQuickCapture() {
     if (!quickText.trim()) return;
@@ -189,10 +204,12 @@ export default function Home() {
     setPeople((prev) => [person, ...prev]);
     setSelectedId(person.id);
     setQuickText("");
+    setView("detail");
+    window.history.pushState(null, "", `/?person=${encodeURIComponent(person.id)}`);
   }
 
   function addTouchpoint(personId: string) {
-    const summary = window.prompt("What happened? Example: Coffee at Blank Street. Discussed career, family, Mexico City.");
+    const summary = window.prompt("What happened? Example: Coffee. Discussed startup, family, poker.");
     if (!summary) return;
     const followUp = window.prompt("Follow-up / next step?", "") ?? "";
     setPeople((prev) =>
@@ -230,155 +247,160 @@ export default function Home() {
       const imported = JSON.parse(String(reader.result)) as Person[];
       setPeople(imported);
       setSelectedId(imported[0]?.id ?? "");
+      setView("list");
     };
     reader.readAsText(file);
   }
 
   const agentPrompt = `Add this to People HQ:\nName:\nPersonal or work:\nWhere/when I met them:\nPhone/email:\nWhat we discussed:\nNext step:\nUse concise notes. Do not include confidential work details.`;
 
+  if (view === "detail" && selected) {
+    return (
+      <main className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
+        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
+          <Link href="/" className="mb-4 inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
+            ‹ Contacts
+          </Link>
+
+          <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
+            <div className="flex flex-col items-center px-6 pb-8 pt-10 text-center">
+              <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#e8f2ff] text-3xl font-semibold tracking-[-0.03em] text-[#0071e3]">
+                {initials(selected.name)}
+              </div>
+              <h1 className="mt-5 text-[34px] font-semibold leading-tight tracking-[-0.03em]">{selected.name}</h1>
+              <p className="mt-2 max-w-xl text-[17px] leading-6 text-black/55">
+                {[selected.relationship, selected.organization].filter(Boolean).join(" · ") || "No context yet"}
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                <Pill>{selected.type}</Pill>
+                <Pill>Priority {selected.priority}</Pill>
+                <Pill>Last contact {formatDate(selected.lastContact)}</Pill>
+              </div>
+            </div>
+
+            <div className="divide-y divide-black/10 border-t border-black/10">
+              <InfoRow label="Phone" value={selected.phone || "—"} />
+              <InfoRow label="Email" value={selected.email || "—"} />
+              <InfoRow label="Met" value={[formatDate(selected.metOn), selected.metAt].filter(Boolean).join(" · ")} />
+              <InfoRow label="Tags" value={selected.tags || "—"} />
+              <InfoRow label="Next step" value={selected.nextStep || "—"} />
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-[2rem] bg-white p-5 shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-[22px] font-semibold tracking-[-0.02em]">Notes</h2>
+              <button onClick={() => addTouchpoint(selected.id)} className="min-h-11 rounded-full bg-[#0071e3] px-4 text-[15px] font-medium text-white">
+                Log touchpoint
+              </button>
+            </div>
+            <p className="whitespace-pre-wrap text-[15px] leading-6 text-black/70">{selected.notes || "No notes yet."}</p>
+          </section>
+
+          <section className="mt-4 rounded-[2rem] bg-white p-5 shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
+            <h2 className="mb-3 text-[22px] font-semibold tracking-[-0.02em]">Timeline</h2>
+            <div className="space-y-3">
+              {selected.touchpoints.length ? (
+                selected.touchpoints.map((t) => (
+                  <div key={t.id} className="rounded-3xl bg-[#f5f5f7] p-4">
+                    <p className="text-[13px] font-medium uppercase tracking-[0.04em] text-black/45">
+                      {formatDate(t.date)} · {t.type}
+                    </p>
+                    <p className="mt-1 text-[15px] leading-6 text-black/75">{t.summary}</p>
+                    {t.followUp && <p className="mt-2 text-[15px] text-[#0071e3]">Next: {t.followUp}</p>}
+                  </div>
+                ))
+              ) : (
+                <p className="text-[15px] text-black/50">No touchpoints logged yet.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-[#07110d] text-[#f4ecd8]">
-      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-5 flex flex-col gap-4 border-b border-[#d8cba3]/15 pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-300/70">local-first relationship OS</p>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[#fff8df] sm:text-5xl">People HQ</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#c9bea0]">
-              A private, phone-first place to remember who you meet, what mattered, and the next move. Data now syncs to your private server store so Hermes can add/update records when you ask.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-[#d8cba3]/15 bg-black/25 px-4 py-3 font-mono text-xs text-[#c9bea0]">
-            server-backed · {people.length} people · {syncStatus}
+    <main className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
+      <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
+        <header className="pb-5">
+          <p className="text-[13px] font-medium text-black/45">People HQ</p>
+          <div className="mt-1 flex items-end justify-between gap-3">
+            <div>
+              <h1 className="text-[40px] font-semibold leading-none tracking-[-0.045em] sm:text-[52px]">Contacts</h1>
+              <p className="mt-3 max-w-xl text-[17px] leading-6 text-black/58">Friendly relationship memory, synced for Hermes updates.</p>
+            </div>
+            <div className="hidden rounded-full bg-white px-4 py-2 text-[13px] text-black/50 shadow-[0_10px_35px_rgba(0,0,0,0.06)] sm:block">{syncStatus}</div>
           </div>
         </header>
 
-        <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-[#d8cba3]/15 bg-[#0b1712] p-4 shadow-2xl shadow-black/25">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Quick capture</h2>
-              <span className="font-mono text-[11px] text-emerald-300/70">fast enough for after coffee</span>
-            </div>
-            <textarea
-              className="min-h-36 w-full rounded-2xl border border-[#d8cba3]/15 bg-black/25 p-4 text-sm leading-6 text-[#fff8df] outline-none placeholder:text-[#7f765f] focus:border-emerald-300/50"
-              placeholder="Met Dom for coffee today. Personal. Phone/email. Discussed investing, Mexico City, friends in NYC. Follow up in two weeks."
-              value={quickText}
-              onChange={(e) => setQuickText(e.target.value)}
-            />
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={addQuickCapture} className="rounded-full bg-emerald-300 px-4 py-2 text-sm font-semibold text-[#07110d]">Add person</button>
-              <button onClick={() => navigator.clipboard.writeText(agentPrompt)} className="rounded-full border border-[#d8cba3]/20 px-4 py-2 text-sm text-[#f4ecd8]">Copy Hermes/Cowork intake prompt</button>
-            </div>
+        <section className="rounded-[2rem] bg-white p-4 shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-[22px] font-semibold tracking-[-0.02em]">Quick capture</h2>
+            <span className="rounded-full bg-[#f5f5f7] px-3 py-1 text-[12px] text-black/45">voice-note friendly</span>
           </div>
-
-          <form onSubmit={savePerson} className="rounded-3xl border border-[#d8cba3]/15 bg-[#0b1712] p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Structured add / edit</h2>
-              <button type="button" onClick={() => setForm(blankPerson())} className="font-mono text-xs text-[#c9bea0] underline decoration-[#d8cba3]/30">new blank</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input className="field col-span-2" placeholder="Name" value={form.name} onChange={(e) => updateForm("name", e.target.value)} />
-              <select className="field" value={form.type} onChange={(e) => updateForm("type", e.target.value as PersonType)}>
-                <option value="personal">Personal</option>
-                <option value="work">Work</option>
-              </select>
-              <select className="field" value={form.priority} onChange={(e) => updateForm("priority", e.target.value as Person["priority"])}>
-                <option value="A">A priority</option>
-                <option value="B">B priority</option>
-                <option value="C">C priority</option>
-              </select>
-              <input className="field" placeholder="Relationship" value={form.relationship} onChange={(e) => updateForm("relationship", e.target.value)} />
-              <input className="field" placeholder="Org / context" value={form.organization} onChange={(e) => updateForm("organization", e.target.value)} />
-              <input className="field" placeholder="Email" value={form.email} onChange={(e) => updateForm("email", e.target.value)} />
-              <input className="field" placeholder="Phone" value={form.phone} onChange={(e) => updateForm("phone", e.target.value)} />
-              <input className="field" placeholder="Met at" value={form.metAt} onChange={(e) => updateForm("metAt", e.target.value)} />
-              <input className="field" type="date" value={form.metOn} onChange={(e) => updateForm("metOn", e.target.value)} />
-              <input className="field col-span-2" placeholder="Tags" value={form.tags} onChange={(e) => updateForm("tags", e.target.value)} />
-              <textarea className="field col-span-2 min-h-20" placeholder="Notes / what matters" value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} />
-              <input className="field col-span-2" placeholder="Next step" value={form.nextStep} onChange={(e) => updateForm("nextStep", e.target.value)} />
-            </div>
-            <button className="mt-3 w-full rounded-full bg-[#f4ecd8] px-4 py-2 text-sm font-semibold text-[#07110d]">Save person</button>
-          </form>
+          <textarea
+            className="min-h-32 w-full resize-none rounded-[1.35rem] border-0 bg-[#f5f5f7] p-4 text-[16px] leading-6 text-[#1d1d1f] outline-none placeholder:text-black/35 focus:ring-2 focus:ring-[#0071e3]/25"
+            placeholder="Met Oakley for coffee. Work + personal. Blackstone real estate debt, real estate AI startup, poker. Follow up in 3 weeks."
+            value={quickText}
+            onChange={(e) => setQuickText(e.target.value)}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={addQuickCapture} className="min-h-11 rounded-full bg-[#0071e3] px-5 text-[16px] font-medium text-white">
+              Add person
+            </button>
+            <button onClick={() => navigator.clipboard.writeText(agentPrompt)} className="min-h-11 rounded-full bg-[#f5f5f7] px-5 text-[16px] font-medium text-[#0071e3]">
+              Copy intake prompt
+            </button>
+          </div>
         </section>
 
-        <section className="my-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <section className="my-4 grid grid-cols-4 gap-2">
           <Stat label="Total" value={people.length} />
           <Stat label="Personal" value={personal} />
           <Stat label="Work" value={work} />
-          <Stat label="Cold 45d+" value={stale.length} />
+          <Stat label="45d+" value={stale.length} />
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-3xl border border-[#d8cba3]/15 bg-[#0b1712] p-4">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-              <input className="field flex-1" placeholder="Search people, topics, tags" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <select className="field sm:w-36" value={filter} onChange={(e) => setFilter(e.target.value as "all" | PersonType)}>
-                <option value="all">All</option>
-                <option value="personal">Personal</option>
-                <option value="work">Work</option>
-              </select>
-            </div>
-            <div className="divide-y divide-[#d8cba3]/10 overflow-hidden rounded-2xl border border-[#d8cba3]/10">
-              {filtered.map((p) => (
-                <button key={p.id} onClick={() => setSelectedId(p.id)} className={`block w-full px-4 py-3 text-left transition ${selectedId === p.id ? "bg-emerald-300/10" : "bg-black/15 hover:bg-white/[0.04]"}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-medium text-[#fff8df]">{p.name}</span>
-                    <span className="rounded-full border border-[#d8cba3]/15 px-2 py-0.5 font-mono text-[10px] uppercase text-[#c9bea0]">{p.type} · {p.priority}</span>
-                  </div>
-                  <p className="mt-1 truncate text-xs text-[#9f9578]">{p.relationship || p.organization || p.tags || "No context yet"}</p>
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={exportData} className="rounded-full border border-[#d8cba3]/20 px-3 py-2 text-xs text-[#f4ecd8]">Export JSON backup</button>
-              <label className="cursor-pointer rounded-full border border-[#d8cba3]/20 px-3 py-2 text-xs text-[#f4ecd8]">
-                Import JSON
-                <input type="file" accept="application/json" className="hidden" onChange={importData} />
-              </label>
+        <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
+          <div className="border-b border-black/10 p-4">
+            <input
+              className="h-12 w-full rounded-2xl border-0 bg-[#f5f5f7] px-4 text-[16px] outline-none placeholder:text-black/35 focus:ring-2 focus:ring-[#0071e3]/25"
+              placeholder="Search people"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <div className="mt-3 flex gap-2">
+              <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>All</FilterButton>
+              <FilterButton active={filter === "personal"} onClick={() => setFilter("personal")}>Personal</FilterButton>
+              <FilterButton active={filter === "work"} onClick={() => setFilter("work")}>Work</FilterButton>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-[#d8cba3]/15 bg-[#0b1712] p-4">
-            {selected ? (
-              <div>
-                <div className="flex flex-col gap-3 border-b border-[#d8cba3]/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="font-mono text-xs uppercase tracking-[0.22em] text-emerald-300/70">{selected.type} · priority {selected.priority}</p>
-                    <h2 className="mt-1 text-3xl font-semibold text-[#fff8df]">{selected.name}</h2>
-                    <p className="mt-1 text-sm text-[#c9bea0]">{selected.relationship} {selected.organization ? `· ${selected.organization}` : ""}</p>
+          <div className="divide-y divide-black/10">
+            {filtered.map((p) => (
+              <Link key={p.id} href={`/?person=${encodeURIComponent(p.id)}`} className="flex min-h-[74px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f5f5f7]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f2ff] text-[15px] font-semibold text-[#0071e3]">
+                  {initials(p.name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-[17px] font-medium tracking-[-0.01em]">{p.name}</p>
+                    <span className="shrink-0 text-[20px] text-black/25">›</span>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => editPerson(selected)} className="rounded-full border border-[#d8cba3]/20 px-3 py-2 text-xs">Edit</button>
-                    <button onClick={() => addTouchpoint(selected.id)} className="rounded-full bg-emerald-300 px-3 py-2 text-xs font-semibold text-[#07110d]">Log touchpoint</button>
-                  </div>
+                  <p className="mt-0.5 truncate text-[14px] text-black/45">{p.relationship || p.organization || p.tags || "No context yet"}</p>
                 </div>
-                <div className="my-4 grid gap-3 sm:grid-cols-2">
-                  <Info label="Met" value={[selected.metOn, selected.metAt].filter(Boolean).join(" · ")} />
-                  <Info label="Last contact" value={`${selected.lastContact || "n/a"} (${daysSince(selected.lastContact)}d ago)`} />
-                  <Info label="Email" value={selected.email || "—"} />
-                  <Info label="Phone" value={selected.phone || "—"} />
-                  <Info label="Tags" value={selected.tags || "—"} />
-                  <Info label="Next step" value={selected.nextStep || "—"} />
-                </div>
-                <div className="rounded-2xl border border-[#d8cba3]/10 bg-black/20 p-4">
-                  <p className="mb-2 font-mono text-xs uppercase tracking-[0.22em] text-[#9f9578]">Notes</p>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-[#e7dcc0]">{selected.notes || "No notes yet."}</p>
-                </div>
-                <div className="mt-4">
-                  <h3 className="mb-2 text-sm font-semibold text-[#fff8df]">Discussions</h3>
-                  <div className="space-y-2">
-                    {selected.touchpoints.length ? selected.touchpoints.map((t) => (
-                      <div key={t.id} className="rounded-2xl border border-[#d8cba3]/10 bg-black/20 p-3">
-                        <div className="mb-1 flex items-center justify-between font-mono text-[11px] text-[#9f9578]"><span>{t.date} · {t.type}</span><span>{t.followUp ? "follow-up set" : ""}</span></div>
-                        <p className="text-sm leading-6 text-[#e7dcc0]">{t.summary}</p>
-                        {t.followUp && <p className="mt-2 text-xs text-emerald-200/80">Next: {t.followUp}</p>}
-                      </div>
-                    )) : <p className="text-sm text-[#9f9578]">No discussions logged yet.</p>}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-[#c9bea0]">Add a person to start.</p>
-            )}
+              </Link>
+            ))}
+            {!filtered.length && <p className="p-6 text-center text-[15px] text-black/45">No matching people.</p>}
+          </div>
+
+          <div className="flex flex-wrap gap-2 border-t border-black/10 p-4">
+            <button onClick={exportData} className="rounded-full bg-[#f5f5f7] px-4 py-2 text-[14px] text-black/60">Export JSON</button>
+            <label className="cursor-pointer rounded-full bg-[#f5f5f7] px-4 py-2 text-[14px] text-black/60">
+              Import JSON
+              <input type="file" accept="application/json" className="hidden" onChange={importData} />
+            </label>
           </div>
         </section>
       </div>
@@ -388,18 +410,30 @@ export default function Home() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl border border-[#d8cba3]/15 bg-[#0b1712] p-4">
-      <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#9f9578]">{label}</p>
-      <p className="mt-2 text-3xl font-semibold text-[#fff8df]">{value}</p>
+    <div className="rounded-3xl bg-white p-3 text-center shadow-[0_10px_35px_rgba(0,0,0,0.05)]">
+      <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-black/40">{label}</p>
+      <p className="mt-1 text-[24px] font-semibold tracking-[-0.03em] text-[#1d1d1f]">{value}</p>
     </div>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Pill({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-full bg-[#f5f5f7] px-3 py-1 text-[13px] font-medium capitalize text-black/55">{children}</span>;
+}
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-[#d8cba3]/10 bg-black/20 p-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#9f9578]">{label}</p>
-      <p className="mt-1 break-words text-sm text-[#e7dcc0]">{value}</p>
+    <button onClick={onClick} className={`min-h-10 rounded-full px-4 text-[15px] font-medium ${active ? "bg-[#0071e3] text-white" : "bg-[#f5f5f7] text-black/60"}`}>
+      {children}
+    </button>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[6.5rem_1fr] gap-3 px-5 py-4 text-[16px]">
+      <p className="text-black/40">{label}</p>
+      <p className="break-words text-black/78">{value}</p>
     </div>
   );
 }

@@ -59,6 +59,15 @@ test("mergePeople adds new records and updates existing records by id", () => {
   assert.equal(merged[1].id, "person-b");
 });
 
+test("mergePeople can update Oakley's last-contact date without duplicating him", () => {
+  const oakley = { ...basePerson, id: "person-oakley-d-2026-06", name: "Oakley D.", lastContact: "" };
+  const merged = mergePeople([oakley], [{ ...oakley, lastContact: "2026-06-20" }]);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "person-oakley-d-2026-06");
+  assert.equal(merged[0].lastContact, "2026-06-20");
+});
+
 test("GitHubPeopleStore reads and writes the private data repository", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetcher: typeof fetch = async (url, init) => {

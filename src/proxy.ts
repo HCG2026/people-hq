@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ACCESS_COOKIE_NAME, accessCookieValue, isPublicAuthPath } from "@/lib/access";
+import { ACCESS_COOKIE_NAME, accessCookieValue, isPublicAuthPath, isValidAssistantToken } from "@/lib/access";
 
 const PUBLIC_FILE = /\.(.*)$/;
 
@@ -20,6 +20,13 @@ export function proxy(request: NextRequest) {
   const expectedPassword = process.env.PEOPLE_HQ_PASSWORD;
   const expectedToken = accessCookieValue(expectedPassword, process.env.PEOPLE_HQ_SESSION_TOKEN);
   const actualToken = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
+
+  if (pathname.startsWith("/api/assistant")) {
+    if (isValidAssistantToken(request.headers.get("authorization"), process.env.PEOPLE_HQ_ASSISTANT_TOKEN)) {
+      return NextResponse.next();
+    }
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   if (expectedToken && actualToken === expectedToken) {
     return NextResponse.next();

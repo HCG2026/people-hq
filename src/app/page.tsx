@@ -1,93 +1,8 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type PersonType = "personal" | "work";
-type TouchpointType = "coffee" | "call" | "dinner" | "meeting" | "text" | "email" | "other";
-
-type Touchpoint = {
-  id: string;
-  date: string;
-  type: TouchpointType;
-  summary: string;
-  topics: string;
-  followUp: string;
-};
-
-type Person = {
-  id: string;
-  name: string;
-  type: PersonType;
-  relationship: string;
-  organization: string;
-  email: string;
-  phone: string;
-  metAt: string;
-  metOn: string;
-  priority: "A" | "B" | "C";
-  tags: string;
-  notes: string;
-  lastContact: string;
-  nextStep: string;
-  touchpoints: Touchpoint[];
-};
-
-const STORAGE_KEY = "people-hq:v1";
-
-const seedPeople: Person[] = [
-  {
-    id: "demo-dom",
-    name: "Dom Example",
-    type: "personal",
-    relationship: "Friend / warm relationship",
-    organization: "NYC",
-    email: "",
-    phone: "",
-    metAt: "Coffee in Flatiron",
-    metOn: "2026-06-01",
-    priority: "A",
-    tags: "NYC, soccer, founder energy",
-    notes: "Demo record. Replace with the real Dom details when ready.",
-    lastContact: "2026-06-01",
-    nextStep: "Send quick note and suggest another coffee in 2-3 weeks.",
-    touchpoints: [
-      {
-        id: "tp-demo-dom",
-        date: "2026-06-01",
-        type: "coffee",
-        summary: "Met for coffee. Good energy and worth keeping warm.",
-        topics: "life, work, NYC",
-        followUp: "Text a thank-you note.",
-      },
-    ],
-  },
-];
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function uid(prefix = "id") {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-const blankPerson = (): Person => ({
-  id: uid("person"),
-  name: "",
-  type: "personal",
-  relationship: "",
-  organization: "",
-  email: "",
-  phone: "",
-  metAt: "",
-  metOn: today(),
-  priority: "B",
-  tags: "",
-  notes: "",
-  lastContact: today(),
-  nextStep: "",
-  touchpoints: [],
-});
+import { blankPerson, seedPeople, STORAGE_KEY, today, uid, type Person, type PersonType, type Touchpoint, type TouchpointType } from "@/lib/people";
 
 function daysSince(date?: string) {
   if (!date) return 9999;
@@ -152,10 +67,72 @@ export default function Home() {
   const [filter, setFilter] = useState<"all" | PersonType>("all");
   const [form, setForm] = useState<Person>(blankPerson());
   const [quickText, setQuickText] = useState("");
+  const [syncStatus, setSyncStatus] = useState("Loading server sync…");
+  const serverEnabled = useRef(false);
+  const loadedServer = useRef(false);
+  const skipNextServerSave = useRef(false);
 
   useEffect(() => {
-    if (!people.length) return;
+    let cancelled = false;
+
+    async function loadServerPeople() {
+      try {
+        const response = await fetch("/api/people", { cache: "no-store" });
+        if (!response.ok) throw new Error("server unavailable");
+        const body = (await response.json()) as { people?: Person[] };
+        if (cancelled) return;
+        serverEnabled.current = true;
+        loadedServer.current = true;
+        skipNextServerSave.current = true;
+        const remotePeople = Array.isArray(body.people) ? body.people : [];
+        setPeople(remotePeople);
+        setSelectedId(remotePeople[0]?.id ?? "");
+        setSyncStatus(`Server sync on · ${remotePeople.length} people`);
+      } catch {
+        if (cancelled) return;
+        loadedServer.current = true;
+        setSyncStatus("Local-only fallback · server sync not configured");
+      }
+    }
+
+    loadServerPeople();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(people));
+  }, [people]);
+
+  useEffect(() => {
+    if (!serverEnabled.current || !loadedServer.current) return;
+    if (skipNextServerSave.current) {
+      skipNextServerSave.current = false;
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      try {
+        setSyncStatus("Saving to server…");
+        const response = await fetch("/api/people", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ people }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("save failed");
+        setSyncStatus(`Server sync on · ${people.length} people`);
+      } catch {
+        if (!controller.signal.aborted) setSyncStatus("Save failed · local backup kept in this browser");
+      }
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [people]);
 
   const selected = people.find((p) => p.id === selectedId) ?? people[0];
@@ -267,11 +244,11 @@ export default function Home() {
             <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-emerald-300/70">local-first relationship OS</p>
             <h1 className="mt-2 text-4xl font-semibold tracking-tight text-[#fff8df] sm:text-5xl">People HQ</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[#c9bea0]">
-              A private, phone-first place to remember who you meet, what mattered, and the next move. Public code; private data stays in your browser unless you export it.
+              A private, phone-first place to remember who you meet, what mattered, and the next move. Data now syncs to your private server store so Hermes can add/update records when you ask.
             </p>
           </div>
           <div className="rounded-2xl border border-[#d8cba3]/15 bg-black/25 px-4 py-3 font-mono text-xs text-[#c9bea0]">
-            local-first · {people.length} people · install from Safari/Chrome share menu
+            server-backed · {people.length} people · {syncStatus}
           </div>
         </header>
 

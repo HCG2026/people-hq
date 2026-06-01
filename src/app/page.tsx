@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { blankPerson, seedPeople, STORAGE_KEY, today, uid, type Person, type PersonType, type Touchpoint, type TouchpointType } from "@/lib/people";
@@ -208,6 +207,17 @@ export default function Home() {
     window.history.pushState(null, "", `/?person=${encodeURIComponent(person.id)}`);
   }
 
+  function openPerson(personId: string) {
+    setSelectedId(personId);
+    setView("detail");
+    window.history.pushState(null, "", `/?person=${encodeURIComponent(personId)}`);
+  }
+
+  function showContactList() {
+    setView("list");
+    window.history.pushState(null, "", "/");
+  }
+
   function addTouchpoint(personId: string) {
     const summary = window.prompt("What happened? Example: Coffee. Discussed startup, family, poker.");
     if (!summary) return;
@@ -258,9 +268,9 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
-          <Link href="/" className="mb-4 inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
+          <button onClick={showContactList} className="mb-4 inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
             ‹ Contacts
-          </Link>
+          </button>
 
           <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
             <div className="flex flex-col items-center px-6 pb-8 pt-10 text-center">
@@ -379,7 +389,7 @@ export default function Home() {
 
           <div className="divide-y divide-black/10">
             {filtered.map((p) => (
-              <Link key={p.id} href={`/?person=${encodeURIComponent(p.id)}`} className="flex min-h-[74px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f5f5f7]">
+              <a key={p.id} href={`/?person=${encodeURIComponent(p.id)}`} onClick={() => openPerson(p.id)} className="flex min-h-[74px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f5f5f7]">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f2ff] text-[15px] font-semibold text-[#0071e3]">
                   {initials(p.name)}
                 </div>
@@ -390,7 +400,7 @@ export default function Home() {
                   </div>
                   <p className="mt-0.5 truncate text-[14px] text-black/45">{p.relationship || p.organization || p.tags || "No context yet"}</p>
                 </div>
-              </Link>
+              </a>
             ))}
             {!filtered.length && <p className="p-6 text-center text-[15px] text-black/45">No matching people.</p>}
           </div>

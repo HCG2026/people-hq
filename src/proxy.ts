@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ACCESS_COOKIE_NAME, accessTokenForPassword, isPublicAuthPath } from "@/lib/access";
+import { ACCESS_COOKIE_NAME, accessCookieValue, isPublicAuthPath } from "@/lib/access";
 
 const PUBLIC_FILE = /\.(.*)$/;
 
@@ -18,7 +18,7 @@ export function proxy(request: NextRequest) {
   }
 
   const expectedPassword = process.env.PEOPLE_HQ_PASSWORD;
-  const expectedToken = accessTokenForPassword(expectedPassword);
+  const expectedToken = accessCookieValue(expectedPassword, process.env.PEOPLE_HQ_SESSION_TOKEN);
   const actualToken = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
 
   if (expectedToken && actualToken === expectedToken) {

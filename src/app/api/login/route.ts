@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ACCESS_COOKIE_NAME, accessTokenForPassword, isValidAccessPassword } from "@/lib/access";
+import { ACCESS_COOKIE_NAME, accessCookieValue, isValidAccessPassword } from "@/lib/access";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const response = NextResponse.redirect(new URL("/", request.url), 303);
   response.cookies.set({
     name: ACCESS_COOKIE_NAME,
-    value: accessTokenForPassword(expectedPassword),
+    value: accessCookieValue(expectedPassword, process.env.PEOPLE_HQ_SESSION_TOKEN),
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

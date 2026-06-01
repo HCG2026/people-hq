@@ -12,6 +12,11 @@ export function accessTokenForPassword(password: string | undefined): string {
   return btoa(`people-hq:${password}:v1`);
 }
 
+export function accessCookieValue(password: string | undefined, sessionToken: string | undefined): string {
+  if (sessionToken) return sessionToken;
+  return accessTokenForPassword(password);
+}
+
 export function isPublicAuthPath(pathname: string): boolean {
   return publicAuthPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }

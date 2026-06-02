@@ -284,7 +284,7 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
         <div className="mx-auto max-w-3xl px-4 pb-5 pt-0 sm:px-6 sm:pt-5">
-          <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-black/10 bg-[#f5f5f7]/92 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+          <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-black/10 bg-[#f5f5f7]/92 px-4 pb-3 pt-12 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
             <button onClick={showContactList} className="inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
             ‹ Contacts
             </button>

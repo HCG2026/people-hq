@@ -20,4 +20,5 @@ test("contact detail back control explicitly returns to list state", () => {
   assert.match(pageSource, /function showContactList\(\)/);
   assert.match(pageSource, /<button onClick=\{showContactList\}/);
   assert.match(pageSource, /sticky top-0/);
+  assert.match(pageSource, /pb-3 pt-12/);
 });

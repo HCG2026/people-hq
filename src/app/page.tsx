@@ -110,6 +110,22 @@ export default function Home() {
   const skipNextServerSave = useRef(false);
 
   useEffect(() => {
+    function handlePopState() {
+      const requestedId = new URL(window.location.href).searchParams.get("person");
+      if (requestedId) {
+        setSelectedId(requestedId);
+        setView("detail");
+        return;
+      }
+      setSelectedId((current) => current || people[0]?.id || "");
+      setView("list");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [people]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadServerPeople() {
@@ -267,10 +283,12 @@ export default function Home() {
   if (view === "detail" && selected) {
     return (
       <main className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
-        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-6">
-          <button onClick={showContactList} className="mb-4 inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
+        <div className="mx-auto max-w-3xl px-4 pb-5 pt-0 sm:px-6 sm:pt-5">
+          <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-black/10 bg-[#f5f5f7]/92 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+            <button onClick={showContactList} className="inline-flex min-h-11 items-center rounded-full px-1 text-[17px] text-[#0071e3]">
             ‹ Contacts
-          </button>
+            </button>
+          </div>
 
           <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_18px_55px_rgba(0,0,0,0.08)]">
             <div className="flex flex-col items-center px-6 pb-8 pt-10 text-center">
@@ -389,7 +407,7 @@ export default function Home() {
 
           <div className="divide-y divide-black/10">
             {filtered.map((p) => (
-              <a key={p.id} href={`/?person=${encodeURIComponent(p.id)}`} onClick={() => openPerson(p.id)} className="flex min-h-[74px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f5f5f7]">
+              <a key={p.id} href={`/?person=${encodeURIComponent(p.id)}`} onClick={(event) => { event.preventDefault(); openPerson(p.id); }} className="flex min-h-[74px] w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#f5f5f7]">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f2ff] text-[15px] font-semibold text-[#0071e3]">
                   {initials(p.name)}
                 </div>
